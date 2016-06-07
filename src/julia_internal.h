@@ -39,6 +39,7 @@ extern "C" {
 
 // useful constants
 extern jl_methtable_t *jl_type_type_mt;
+extern size_t jl_world_counter;
 
 typedef void (*tracer_cb)(jl_value_t *tracee);
 void jl_call_tracer(tracer_cb callback, jl_value_t *tracee);
@@ -741,6 +742,7 @@ jl_typemap_entry_t *jl_typemap_insert(union jl_typemap_t *cache, jl_value_t *par
                                       jl_tupletype_t *simpletype, jl_svec_t *guardsigs,
                                       jl_value_t *newvalue, int8_t offs,
                                       const struct jl_typemap_info *tparams,
+                                      size_t min_world, size_t max_world,
                                       jl_value_t **overwritten);
 
 jl_typemap_entry_t *jl_typemap_assoc_by_type(union jl_typemap_t ml_or_cache, jl_tupletype_t *types, jl_svec_t **penv,
