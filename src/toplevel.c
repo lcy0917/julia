@@ -86,7 +86,6 @@ void jl_module_run_initializer(jl_module_t *m)
         jl_get_ptls_states()->world_age = last_age;
     }
     JL_CATCH {
-        jl_get_ptls_states()->world_age = last_age;
         if (jl_initerror_type == NULL) {
             jl_rethrow();
         }
@@ -205,7 +204,6 @@ jl_value_t *jl_eval_module_expr(jl_expr_t *ex)
         }
     }
     JL_CATCH {
-        ptls->world_age = last_age;
         ptls->current_module = last_module;
         ptls->current_task->current_module = task_last_m;
         outermost = prev_outermost;
@@ -644,7 +642,8 @@ jl_value_t *jl_toplevel_eval_flex(jl_value_t *e, int fast, int expanded)
 
     if (ewc) {
         jl_method_instance_t *li = jl_new_thunk(thk);
-        jl_type_infer(li, 0);
+        size_t world = jl_get_ptls_states()->world_age;
+        jl_type_infer(li, world, 0);
         jl_value_t *dummy_f_arg = NULL;
         result = jl_call_method_internal(li, &dummy_f_arg, 1);
     }

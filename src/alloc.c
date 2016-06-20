@@ -456,8 +456,9 @@ STATIC_INLINE jl_value_t *jl_call_staged(jl_svec_t *sparam_vals, jl_method_insta
     fptr.fptr = generator->fptr;
     fptr.jlcall_api = generator->jlcall_api;
     if (__unlikely(fptr.fptr == NULL || fptr.jlcall_api == 0)) {
-        void *F = jl_compile_linfo(generator, (jl_code_info_t*)generator->inferred).functionObject;
-        fptr = jl_generate_fptr(generator, F);
+        size_t world = generator->def->min_world;
+        void *F = jl_compile_linfo(generator, (jl_code_info_t*)generator->inferred, world).functionObject;
+        fptr = jl_generate_fptr(generator, F, world);
     }
     assert(jl_svec_len(generator->def->sparam_syms) == jl_svec_len(sparam_vals));
     if (fptr.jlcall_api == 1)
@@ -508,6 +509,7 @@ JL_DLLEXPORT jl_code_info_t *jl_code_for_staged(jl_method_instance_t *linfo)
         // invoke code generator
         assert(jl_nparams(tt) == jl_array_len(argnames) ||
                (linfo->def->isva && (jl_nparams(tt) >= jl_array_len(argnames) - 1)));
+        // TODO: set world to that of the generator while calling func
         jl_array_ptr_set(body->args, 1,
                 jl_call_staged(sparam_vals, generator, jl_svec_data(tt->parameters), jl_nparams(tt)));
 
@@ -626,6 +628,8 @@ JL_DLLEXPORT jl_method_t *jl_new_method_uninit(void)
     m->nargs = 0;
     m->needs_sparam_vals_ducttape = 2;
     m->traced = 0;
+    m->min_world = 1;
+    m->max_world = ~(size_t)0;
     JL_MUTEX_INIT(&m->writelock);
     return m;
 }
@@ -647,6 +651,7 @@ jl_method_t *jl_new_method(jl_code_info_t *definition,
     JL_GC_PUSH1(&root);
 
     jl_method_t *m = jl_new_method_uninit();
+    m->min_world = ++jl_world_counter;
     m->isstaged = isstaged;
     m->name = name;
     m->sig = sig;

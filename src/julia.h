@@ -230,8 +230,11 @@ typedef struct _jl_method_t {
 
     // method's type signature. redundant with TypeMapEntry->specTypes
     jl_tupletype_t *sig;
-    // bound type variables (static parameters). redundant with TypeMapEntry->tvars
+    // bound type variables (static parameters)
     jl_svec_t *tvars;
+    size_t min_world;
+    size_t max_world;
+
     // list of potentially-ambiguous methods (nothing = none, Vector{Any} of Methods otherwise)
     jl_value_t *ambig;
 
@@ -1026,6 +1029,7 @@ JL_DLLEXPORT jl_value_t *jl_generic_function_def(jl_sym_t *name, jl_value_t **bp
 JL_DLLEXPORT void jl_method_def(jl_svec_t *argdata, jl_code_info_t *f, jl_value_t *isstaged);
 JL_DLLEXPORT jl_code_info_t *jl_code_for_staged(jl_method_instance_t *linfo);
 JL_DLLEXPORT jl_code_info_t *jl_copy_code_info(jl_code_info_t *src);
+JL_DLLEXPORT size_t jl_get_world_counter(void);
 JL_DLLEXPORT jl_function_t *jl_get_kwsorter(jl_typename_t *tn);
 JL_DLLEXPORT jl_value_t *jl_box_bool(int8_t x);
 JL_DLLEXPORT jl_value_t *jl_box_int8(int8_t x);
@@ -1409,6 +1413,7 @@ typedef struct _jl_handler_t {
     sig_atomic_t defer_signal;
     int finalizers_inhibited;
     jl_timing_block_t *timing_stack;
+    size_t world_age;
 } jl_handler_t;
 
 typedef struct _jl_task_t {
@@ -1509,6 +1514,7 @@ STATIC_INLINE void jl_eh_restore_state(jl_handler_t *eh)
         locks->len = eh->locks_len;
     }
 #endif
+    ptls->world_age = eh->world_age;
     ptls->defer_signal = eh->defer_signal;
     ptls->gc_state = eh->gc_state;
     ptls->finalizers_inhibited = eh->finalizers_inhibited;

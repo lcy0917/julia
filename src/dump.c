@@ -891,6 +891,8 @@ static void jl_serialize_value_(jl_serializer_state *s, jl_value_t *v)
         write_int8(s->s, m->isstaged);
         jl_serialize_value(s, (jl_value_t*)m->file);
         write_int32(s->s, m->line);
+        write_int32(s->s, m->min_world);
+        write_int32(s->s, m->max_world);
         jl_serialize_value(s, (jl_value_t*)m->sig);
         jl_serialize_value(s, (jl_value_t*)m->tvars);
         if (s->mode != MODE_MODULE_POSTWORK)
@@ -1173,8 +1175,11 @@ static void write_dependency_list(ios_t *s)
     static jl_value_t *unique_func = NULL;
     if (!unique_func)
         unique_func = jl_get_global(jl_base_module, jl_symbol("unique"));
-    jl_value_t *uniqargs[2] = {unique_func,(jl_value_t*)deps};
+    jl_value_t *uniqargs[2] = {unique_func, (jl_value_t*)deps};
+    size_t last_age = jl_get_ptls_states()->world_age;
+    jl_get_ptls_states()->world_age = jl_world_counter;
     jl_array_t *udeps = deps && unique_func ? (jl_array_t*)jl_apply(uniqargs, 2) : NULL;
+    jl_get_ptls_states()->world_age = last_age;
 
     JL_GC_PUSH1(&udeps);
     if (udeps) {
@@ -1523,6 +1528,8 @@ static jl_value_t *jl_deserialize_value_(jl_serializer_state *s, jl_value_t *vta
         m->isstaged = read_int8(s->s);
         m->file = (jl_sym_t*)jl_deserialize_value(s, NULL);
         m->line = read_int32(s->s);
+        m->min_world = read_int32(s->s);
+        m->max_world = read_int32(s->s);
         m->sig = (jl_tupletype_t*)jl_deserialize_value(s, (jl_value_t**)&m->sig);
         jl_gc_wb(m, m->sig);
         m->tvars = (jl_svec_t*)jl_deserialize_value(s, (jl_value_t**)&m->tvars);
@@ -1583,7 +1590,7 @@ static jl_value_t *jl_deserialize_value_(jl_serializer_state *s, jl_value_t *vta
             if (external) {
                 jl_datatype_t *ftype = jl_first_argument_datatype((jl_value_t*)li->specTypes);
                 jl_methtable_t *mt = ftype->name->mt;
-                li = jl_method_lookup_by_type(mt, li->specTypes, 0, 0, 0);
+                li = jl_method_lookup_by_type(mt, li->specTypes, 0, 0, 0, /*TODO*/jl_world_counter);
                 assert(li);
                 backref_list.items[pos] = li;
                 return (jl_value_t*)li;
@@ -2063,6 +2070,7 @@ static void jl_save_system_image_to_stream(ios_t *f)
 
     write_int32(f, jl_get_t_uid_ctr());
     write_int32(f, jl_get_gs_ctr());
+    write_int32(f, jl_world_counter);
     jl_finalize_serializer(&s); // done with f and s
 
     htable_reset(&backref_table, 0);
@@ -2172,6 +2180,7 @@ static void jl_restore_system_image_from_stream(ios_t *f)
 
     int uid_ctr = read_int32(f);
     int gs_ctr = read_int32(f);
+    jl_world_counter = read_int32(f);
     jl_module_init_order = jl_finalize_deserializer(&s, NULL); // done with s and f
 
     jl_set_t_uid_ctr(uid_ctr);
@@ -2440,7 +2449,7 @@ static void jl_recache_types(void)
             jl_datatype_t *ftype = jl_first_argument_datatype((jl_value_t*)argtypes);
             jl_methtable_t *mt = ftype->name->mt;
             jl_set_typeof(li, (void*)(intptr_t)0x30); // invalidate the old value to help catch errors
-            li = jl_method_lookup_by_type(mt, argtypes, 0, 0, 0);
+            li = jl_method_lookup_by_type(mt, argtypes, 0, 0, 0, /*TODO*/jl_world_counter);
             assert(li);
             // update the backref list
             if (loc) *loc = (jl_value_t*)li;
