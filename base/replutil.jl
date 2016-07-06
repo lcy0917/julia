@@ -335,10 +335,14 @@ function showerror(io::IO, ex::MethodError)
         basef = getfield(Base, name)
         if basef !== ex.f && method_exists(basef, arg_types)
             println(io)
-            print(io, "you may have intended to import Base.", name)
+            print(io, "You may have intended to import Base.", name)
         end
     end
-    # TODO: world counter check
+    if method_exists(ex.f, typeof(ex.args))
+        curworld = ccall(:jl_get_world_counter, UInt, ())
+        println(io)
+        print(io, "The applicable method may be too new: running in world age $(ex.world), while current world is $(curworld).")
+    end
     if !is_arg_types
         # Check for row vectors used where a column vector is intended.
         vec_args = []
@@ -515,7 +519,7 @@ function show_method_candidates(io::IO, ex::MethodError, kwargs::Vector=Any[])
                 kwords = Symbol[]
                 if isdefined(ft.name.mt, :kwsorter)
                     kwsorter_t = typeof(ft.name.mt.kwsorter)
-                    kwords = kwarg_decl(method.sig, kwsorter_t)
+                    kwords = kwarg_decl(method, kwsorter_t)
                     length(kwords) > 0 && print(buf, "; ", join(kwords, ", "))
                 end
                 print(buf, ")")
@@ -535,6 +539,12 @@ function show_method_candidates(io::IO, ex::MethodError, kwargs::Vector=Any[])
                             print(buf, " got unsupported keyword argument$plur \"", join(unexpected, "\", \""), "\"")
                         end
                     end
+                end
+                if ex.world < min_age(method)
+                    print(buf, " (method too new to be called from this world context.)")
+                end
+                if ex.world > max_age(method)
+                    print(buf, " (method deleted before this world age.)")
                 end
                 # TODO: indicate if it's in the wrong world
                 push!(lines, (buf, right_matches))

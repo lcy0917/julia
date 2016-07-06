@@ -431,6 +431,7 @@ static void jl_update_all_fptrs(void)
     jl_method_instance_t **linfos = (jl_method_instance_t**)malloc(sizeof(jl_method_instance_t*) * sysimg_fvars_max);
     for (i = 0; i < delayed_fptrs_n; i++) {
         jl_method_instance_t *li = delayed_fptrs[i].li;
+        assert(li->def);
         int32_t func = delayed_fptrs[i].func - 1;
         if (func >= 0) {
             jl_fptr_to_llvm((jl_fptr_t)fvars[func], li, 0);
@@ -926,25 +927,31 @@ static void jl_serialize_value_(jl_serializer_state *s, jl_value_t *v)
         jl_serialize_value(s, li->inferred);
         jl_serialize_value(s, li->rettype);
         jl_serialize_value(s, (jl_value_t*)li->sparam_vals);
+        jl_serialize_value(s, (jl_value_t*)li->backedges);
         jl_serialize_value(s, (jl_value_t*)li->def);
-        uint16_t id = jl_fptr_id((void*)(uintptr_t)li->fptr);
-        if (li->jlcall_api == 2) {
-            write_int8(s->s, 2);
-        }
-        else if (id >= 2) {
-            write_int8(s->s, -li->jlcall_api);
-            write_uint16(s->s, id);
-        }
-        else if (li->functionObjectsDecls.functionObject) {
-            int jlcall_api = jl_jlcall_api(li->functionObjectsDecls.functionObject);
-            assert(jlcall_api);
-            // save functionObject pointers
-            write_int8(s->s, jlcall_api);
-            write_int32(s->s, jl_assign_functionID(li->functionObjectsDecls.functionObject));
-            write_int32(s->s, jl_assign_functionID(li->functionObjectsDecls.specFunctionObject));
+        if (li->def) {
+            uint16_t id = jl_fptr_id((void*)(uintptr_t)li->fptr);
+            if (li->jlcall_api == 2) {
+                write_int8(s->s, 2);
+            }
+            else if (id >= 2) {
+                write_int8(s->s, -li->jlcall_api);
+                write_uint16(s->s, id);
+            }
+            else if (li->functionObjectsDecls.functionObject) {
+                int jlcall_api = jl_jlcall_api(li->functionObjectsDecls.functionObject);
+                assert(jlcall_api);
+                // save functionObject pointers
+                write_int8(s->s, jlcall_api);
+                write_int32(s->s, jl_assign_functionID(li->functionObjectsDecls.functionObject));
+                write_int32(s->s, jl_assign_functionID(li->functionObjectsDecls.specFunctionObject));
+            }
+            else {
+                write_int8(s->s, 0);
+            }
         }
         else {
-            write_int8(s->s, 0);
+            write_int8(s->s, li->jlcall_api);
         }
     }
     else if (jl_typeis(v, jl_module_type)) {
@@ -1603,6 +1610,9 @@ static jl_value_t *jl_deserialize_value_(jl_serializer_state *s, jl_value_t *vta
         jl_gc_wb(li, li->rettype);
         li->sparam_vals = (jl_svec_t*)jl_deserialize_value(s, (jl_value_t**)&li->sparam_vals);
         jl_gc_wb(li, li->sparam_vals);
+        li->backedges = (jl_array_t*)jl_deserialize_value(s, (jl_value_t**)&li->backedges);
+        if (li->backedges)
+            jl_gc_wb(li, li->backedges);
         li->unspecialized_ducttape = NULL;
         li->def = (jl_method_t*)jl_deserialize_value(s, (jl_value_t**)&li->def);
         if (li->def)
@@ -1611,7 +1621,7 @@ static jl_value_t *jl_deserialize_value_(jl_serializer_state *s, jl_value_t *vta
         li->functionObjectsDecls.specFunctionObject = NULL;
         li->inInference = 0;
         int8_t jlcall_api = read_int8(s->s);
-        if (jlcall_api == 2 || jlcall_api == 0) {
+        if (jlcall_api == 2 || jlcall_api == 0 || li->def == NULL) {
             li->fptr = NULL;
             li->jlcall_api = jlcall_api;
         }

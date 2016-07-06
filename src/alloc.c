@@ -408,6 +408,7 @@ JL_DLLEXPORT jl_method_instance_t *jl_new_method_instance_uninit(void)
     li->inferred = NULL;
     li->rettype = (jl_value_t*)jl_any_type;
     li->sparam_vals = jl_emptysvec;
+    li->backedges = NULL;
     li->fptr = NULL;
     li->unspecialized_ducttape = NULL;
     li->jlcall_api = 0;
@@ -761,7 +762,7 @@ JL_DLLEXPORT jl_sym_t *jl_symbol_lookup(const char *str)
     return symtab_lookup(&symtab, str, strlen(str), NULL);
 }
 
-JL_DLLEXPORT jl_sym_t *jl_symbol_n(const char *str, int32_t len)
+JL_DLLEXPORT jl_sym_t *jl_symbol_n(const char *str, size_t len)
 {
     if (memchr(str, 0, len))
         jl_exceptionf(jl_argumenterror_type, "Symbol name may not contain \\0");

@@ -30,6 +30,11 @@ JL_DLLEXPORT size_t jl_get_world_counter(void)
     return jl_world_counter;
 }
 
+JL_DLLEXPORT size_t jl_get_tls_world_age(void)
+{
+    return jl_get_ptls_states()->world_age;
+}
+
 JL_DLLEXPORT jl_value_t *jl_invoke(jl_method_instance_t *meth, jl_value_t **args, uint32_t nargs)
 {
     return jl_call_method_internal(meth, args, nargs);
@@ -386,7 +391,8 @@ static jl_tupletype_t *join_tsig(jl_tupletype_t *tt, jl_tupletype_t *sig)
 }
 
 static jl_value_t *ml_matches(union jl_typemap_t ml, int offs,
-                              jl_tupletype_t *type, int lim, int include_ambiguous);
+                              jl_tupletype_t *type, int lim, int include_ambiguous,
+                              size_t world);
 
 static void jl_cacheable_sig(
     jl_tupletype_t *const type, // the specialized type signature for type lambda
@@ -722,7 +728,7 @@ static jl_method_instance_t *cache_method(jl_methtable_t *mt, union jl_typemap_t
         temp2 = (jl_value_t*)type;
     }
     if (need_guard_entries) {
-        temp = ml_matches(mt->defs, 0, type, -1, 0); // TODO: use MAX_UNSPECIALIZED_CONFLICTS?
+        temp = ml_matches(mt->defs, 0, type, -1, 0, 0); // TODO: use MAX_UNSPECIALIZED_CONFLICTS?
         int guards = 0;
         if (temp == jl_false) {
             cache_with_orig = 1;
@@ -1009,6 +1015,42 @@ static void update_max_args(jl_methtable_t *mt, jl_tupletype_t *type)
 }
 
 // invalidate cached methods that overlap this definition
+struct invalidate_spec_env {
+    jl_method_instance_t *replaced;
+    size_t max_world;
+    int invalidated;
+};
+static int invalidate_spec(jl_typemap_entry_t *oldentry, void *closure)
+{
+    struct invalidate_spec_env *env = (struct invalidate_spec_env*)closure;
+    if (oldentry->func.linfo == env->replaced) {
+        if (oldentry->max_world > env->max_world) {
+            oldentry->max_world = env->max_world;
+            env->invalidated = 1;
+        }
+    }
+    return 1;
+}
+static void invalidate_conflicting_recursive(jl_method_instance_t *oldentry, size_t max_world)
+{
+    if (oldentry->backedges) {
+        size_t i, l = jl_array_len(oldentry->backedges);
+        for (i = 0; i < l; i++) {
+            struct invalidate_spec_env env;
+            env.max_world = max_world;
+            env.invalidated = 0;
+            env.replaced = (jl_method_instance_t*)jl_array_ptr_ref(oldentry->backedges, i);
+            jl_method_t *m = env.replaced->def;
+            jl_typemap_visitor(m->specializations, invalidate_spec, &env);
+            jl_datatype_t *gf = jl_first_argument_datatype((jl_value_t*)m->sig);
+            assert(jl_is_datatype(gf) && gf->name->mt);
+            jl_typemap_visitor(gf->name->mt->cache, invalidate_spec, &env);
+
+            if (env.invalidated)
+                invalidate_conflicting_recursive(env.replaced, max_world);
+        }
+    }
+}
 struct invalidate_conflicting_env {
     struct typemap_intersection_env match;
     jl_array_t *shadowed;
@@ -1018,10 +1060,11 @@ static int invalidate_conflicting(jl_typemap_entry_t *oldentry, struct typemap_i
 {
     struct invalidate_conflicting_env *closure = container_of(closure0, struct invalidate_conflicting_env, match);
     size_t i, n = jl_array_len(closure->shadowed);
-    jl_value_t **d = jl_array_ptr_data(closure->shadowed);
+    jl_method_t **d = (jl_method_t**)jl_array_ptr_data(closure->shadowed);
     for (i = 0; i < n; i++) {
-        if (d[i] == (jl_value_t*)oldentry->func.linfo->def) {
+        if (d[i] == oldentry->func.linfo->def) {
             oldentry->max_world = closure->max_world;
+            invalidate_conflicting_recursive(oldentry->func.linfo, closure->max_world);
             return 1;
         }
     }
@@ -1069,6 +1112,12 @@ JL_DLLEXPORT void jl_method_table_insert(jl_methtable_t *mt, jl_method_t *method
         env.match.type = (jl_value_t*)type;
         env.max_world = method->min_world - 1;
         jl_typemap_intersection_visitor(mt->cache, jl_cachearg_offset(mt), &env.match);
+
+        size_t i, n = jl_array_len(env.shadowed);
+        jl_method_t **d = (jl_method_t**)jl_array_ptr_data(env.shadowed);
+        for (i = 0; i < n; i++) {
+            jl_typemap_intersection_visitor(d[i]->specializations, 0, &env.match);
+        }
     }
     update_max_args(mt, type);
     JL_UNLOCK(&mt->writelock);
@@ -1201,7 +1250,24 @@ jl_method_instance_t *jl_method_lookup(jl_methtable_t *mt, jl_value_t **args, si
     return sf;
 }
 
-JL_DLLEXPORT jl_value_t *jl_matching_methods(jl_tupletype_t *types, int lim, int include_ambiguous);
+// return a Vector{Any} of svecs, each describing a method match:
+// Any[svec(tt, spvals, m), ...]
+// tt is the intersection of the type argument and the method signature,
+// spvals is any matched static parameter values, m is the Method,
+//
+// lim is the max # of methods to return. if there are more, returns jl_false.
+// -1 for no limit.
+JL_DLLEXPORT jl_value_t *jl_matching_methods(jl_tupletype_t *types, int lim, int include_ambiguous, size_t world)
+{
+    assert(jl_nparams(types) > 0);
+    if (jl_tparam0(types) == jl_bottom_type)
+        return (jl_value_t*)jl_alloc_vec_any(0);
+    assert(jl_is_datatype(jl_tparam0(types)));
+    jl_methtable_t *mt = ((jl_datatype_t*)jl_tparam0(types))->name->mt;
+    if (mt == NULL)
+        return (jl_value_t*)jl_alloc_vec_any(0);
+    return ml_matches(mt->defs, 0, types, lim, include_ambiguous, world);
+}
 
 jl_llvm_functions_t jl_compile_for_dispatch(jl_method_instance_t *li, size_t world)
 {
@@ -1269,7 +1335,7 @@ jl_method_instance_t *jl_get_specialization1(jl_tupletype_t *types, size_t world
         // might match. also be conservative with tuples rather than trying
         // to analyze them in detail.
         if (ti == (jl_value_t*)jl_datatype_type || jl_is_tuple_type(ti)) {
-            jl_value_t *matches = jl_matching_methods(types, 1, 0);
+            jl_value_t *matches = jl_matching_methods(types, 1, 0, world);
             if (matches == jl_false)
                 return NULL;
             break;
@@ -2012,13 +2078,15 @@ struct ml_matches_env {
     jl_svec_t *matc;   // current working svec
     int lim;
     int include_ambiguous;  // whether ambiguous matches should be included
+    size_t world;
 };
 static int ml_matches_visitor(jl_typemap_entry_t *ml, struct typemap_intersection_env *closure0)
 {
     struct ml_matches_env *closure = container_of(closure0, struct ml_matches_env, match);
     int i;
-    if (ml->max_world != ~(size_t)0)
-        return 1; // ignore replaced methods
+    if (closure->world != 0) // use zero as a flag value for returning all matches
+        if (closure->world < ml->min_world || closure->world > ml->max_world)
+            return 1; // ignore method table entries that are not part of this world
     // a method is shadowed if type <: S <: m->sig where S is the
     // signature of another applicable method
     /*
@@ -2158,7 +2226,8 @@ static int ml_matches_visitor(jl_typemap_entry_t *ml, struct typemap_intersectio
 // Returns a match as an array of svec(argtypes, static_params, Method).
 // See below for the meaning of lim.
 static jl_value_t *ml_matches(union jl_typemap_t defs, int offs,
-                              jl_tupletype_t *type, int lim, int include_ambiguous)
+                              jl_tupletype_t *type, int lim, int include_ambiguous,
+                              size_t world)
 {
     size_t l = jl_svec_len(type->parameters);
     jl_value_t *va = NULL;
@@ -2179,29 +2248,11 @@ static jl_value_t *ml_matches(union jl_typemap_t defs, int offs,
     env.matc = NULL;
     env.lim = lim;
     env.include_ambiguous = include_ambiguous;
+    env.world = world;
     JL_GC_PUSH4(&env.t, &env.matc, &env.match.env, &env.match.ti);
     jl_typemap_intersection_visitor(defs, offs, &env.match);
     JL_GC_POP();
     return env.t;
-}
-
-// return a Vector{Any} of svecs, each describing a method match:
-// Any[svec(tt, spvals, m), ...]
-// tt is the intersection of the type argument and the method signature,
-// spvals is any matched static parameter values, m is the Method,
-//
-// lim is the max # of methods to return. if there are more, returns jl_false.
-// -1 for no limit.
-JL_DLLEXPORT jl_value_t *jl_matching_methods(jl_tupletype_t *types, int lim, int include_ambiguous)
-{
-    assert(jl_nparams(types) > 0);
-    if (jl_tparam0(types) == jl_bottom_type)
-        return (jl_value_t*)jl_alloc_vec_any(0);
-    assert(jl_is_datatype(jl_tparam0(types)));
-    jl_methtable_t *mt = ((jl_datatype_t*)jl_tparam0(types))->name->mt;
-    if (mt == NULL)
-        return (jl_value_t*)jl_alloc_vec_any(0);
-    return ml_matches(mt->defs, 0, types, lim, include_ambiguous);
 }
 
 // TODO: separate the codegen and typeinf locks

@@ -275,6 +275,7 @@ typedef struct _jl_method_instance_t {
     jl_tupletype_t *specTypes;  // argument types this was specialized for
     jl_value_t *rettype; // return type for fptr
     jl_svec_t *sparam_vals; // the values for the tvars, indexed by def->sparam_syms
+    jl_array_t *backedges;  // backedges
     jl_value_t *inferred;  // inferred jl_code_info_t, or value of the function if jlcall_api == 2, or null
     jl_method_t *def; // method this is specialized from, null if this is a toplevel thunk
     uint8_t inInference; // flags to tell if inference is running on this function
@@ -1019,7 +1020,7 @@ JL_DLLEXPORT jl_svec_t *jl_svec_fill(size_t n, jl_value_t *x);
 JL_DLLEXPORT jl_value_t *jl_tupletype_fill(size_t n, jl_value_t *v);
 JL_DLLEXPORT jl_sym_t *jl_symbol(const char *str);
 JL_DLLEXPORT jl_sym_t *jl_symbol_lookup(const char *str);
-JL_DLLEXPORT jl_sym_t *jl_symbol_n(const char *str, int32_t len);
+JL_DLLEXPORT jl_sym_t *jl_symbol_n(const char *str, size_t len);
 JL_DLLEXPORT jl_sym_t *jl_gensym(void);
 JL_DLLEXPORT jl_sym_t *jl_tagged_gensym(const char *str, int32_t len);
 JL_DLLEXPORT jl_sym_t *jl_get_root_symbol(void);
