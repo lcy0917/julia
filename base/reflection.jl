@@ -489,7 +489,8 @@ function _dump_function(f::ANY, t::ANY, native::Bool, wrapper::Bool, strip_ir_me
                       tt, meth.sig, meth.tvars)::SimpleVector
     li = func_for_method_checked(meth, tt)
     # try to infer it
-    (linfo, ty, inf) = Core.Inference.typeinf(li, ti, env, true)
+    (linfo, ty, inf) =
+        Core.Inference.typeinf(li, ti, env, Core.Inference.InferenceParams(needtree=false))
     # get the code for it
     return _dump_function(linfo, native, wrapper, strip_ir_metadata, dump_module)
 end
@@ -565,11 +566,10 @@ function code_typed(f::ANY, types::ANY=Tuple; optimize=true)
     asts = []
     for x in _methods(f,types,-1)
         linfo = func_for_method_checked(x[3], types)
-        if optimize
-            (li, ty, inf) = Core.Inference.typeinf(linfo, x[1], x[2], true)
-        else
-            (li, ty, inf) = Core.Inference.typeinf_uncached(linfo, x[1], x[2], optimize=false)
-        end
+        (li, ty, inf) =
+            Core.Inference.typeinf(linfo, x[1], x[2],
+                                   Core.Inference.InferenceParams(optimize=optimize,
+                                                                  cached=optimize))
         inf || error("inference not successful") # Inference disabled
         push!(asts, li)
     end

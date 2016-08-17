@@ -1756,6 +1756,7 @@ macro m6031(x); x; end
 
 # issue #6050
 @test Core.Inference.getfield_tfunc(
+          Core.Inference.InferenceParams(),
           Dict{Int64,Tuple{UnitRange{Int64},UnitRange{Int64}}},
           Core.Inference.Const(:vals)) == (Array{Tuple{UnitRange{Int64},UnitRange{Int64}},1},true)
 
