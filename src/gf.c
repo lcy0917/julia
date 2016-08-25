@@ -146,6 +146,20 @@ JL_DLLEXPORT jl_method_instance_t *jl_specializations_get_linfo(jl_method_t *m, 
     return li;
 }
 
+JL_DLLEXPORT void jl_specialization_set_world(jl_method_instance_t *li, size_t min_world, size_t max_world)
+{
+    if (li->def == NULL)
+        return;
+    jl_typemap_entry_t *sf = jl_typemap_assoc_by_type(li->def->specializations, li->specTypes, NULL, 2, /*subtype*/0, /*offs*/0, max_world);
+    // these asserts are based on how it is used currently from inference.jl
+    // they aren't really correct in general (well, in general, this method will corrupt the system state)
+    assert(sf);
+    assert(sf->min_world <= min_world);
+    assert(sf->max_world >= max_world);
+    sf->min_world = min_world;
+    sf->max_world = max_world;
+}
+
 JL_DLLEXPORT jl_value_t *jl_specializations_lookup(jl_method_t *m, jl_tupletype_t *type, size_t world)
 {
     jl_typemap_entry_t *sf = jl_typemap_assoc_by_type(m->specializations, type, NULL, 2, /*subtype*/0, /*offs*/0, world);
