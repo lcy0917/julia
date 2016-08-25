@@ -1045,23 +1045,22 @@ static int invalidate_spec(jl_typemap_entry_t *oldentry, void *closure)
     }
     return 1;
 }
-static void invalidate_conflicting_recursive(jl_method_instance_t *oldentry, size_t max_world)
+static void invalidate_recursive(jl_array_t *backedges, size_t max_world)
 {
-    if (oldentry->backedges) {
-        size_t i, l = jl_array_len(oldentry->backedges);
+    if (backedges) {
+        size_t i, l = jl_array_len(backedges);
         for (i = 0; i < l; i++) {
             struct invalidate_spec_env env;
             env.max_world = max_world;
             env.invalidated = 0;
-            env.replaced = (jl_method_instance_t*)jl_array_ptr_ref(oldentry->backedges, i);
+            env.replaced = (jl_method_instance_t*)jl_array_ptr_ref(backedges, i);
             jl_method_t *m = env.replaced->def;
             jl_typemap_visitor(m->specializations, invalidate_spec, &env);
             jl_datatype_t *gf = jl_first_argument_datatype((jl_value_t*)m->sig);
             assert(jl_is_datatype(gf) && gf->name->mt);
             jl_typemap_visitor(gf->name->mt->cache, invalidate_spec, &env);
-
             if (env.invalidated)
-                invalidate_conflicting_recursive(env.replaced, max_world);
+                invalidate_recursive(env.replaced->backedges, max_world);
         }
     }
 }
@@ -1078,7 +1077,10 @@ static int invalidate_conflicting(jl_typemap_entry_t *oldentry, struct typemap_i
     for (i = 0; i < n; i++) {
         if (d[i] == oldentry->func.linfo->def) {
             oldentry->max_world = closure->max_world;
-            invalidate_conflicting_recursive(oldentry->func.linfo, closure->max_world);
+            jl_method_instance_t *li = oldentry->func.linfo;
+            jl_array_t *backedges = li->backedges; // unrooted, but no allocations during invalidate_recursive
+            li->backedges = NULL;
+            invalidate_recursive(backedges, closure->max_world);
             return 1;
         }
     }
@@ -1096,6 +1098,7 @@ JL_DLLEXPORT void jl_method_table_insert(jl_methtable_t *mt, jl_method_t *method
     struct invalidate_conflicting_env env;
     env.match.ti = NULL;
     env.match.env = jl_emptysvec;
+    env.max_world = method->min_world - 1;
     JL_GC_PUSH3(&oldvalue, &env.match.env, &env.match.ti);
     JL_LOCK(&mt->writelock);
     jl_typemap_entry_t *newentry = jl_typemap_insert(&mt->defs, (jl_value_t*)mt,
@@ -1109,6 +1112,9 @@ JL_DLLEXPORT void jl_method_table_insert(jl_methtable_t *mt, jl_method_t *method
     }
     else {
         env.shadowed = check_ambiguous_matches(mt->defs, newentry);
+        jl_array_t *backedges = mt->backedges; // unrooted, but no allocations during invalidate_recursive
+        mt->backedges = NULL;
+        invalidate_recursive(backedges, env.max_world);
     }
     if (env.shadowed) {
         oldvalue = (jl_value_t*)env.shadowed; // use as gc root
@@ -1124,7 +1130,6 @@ JL_DLLEXPORT void jl_method_table_insert(jl_methtable_t *mt, jl_method_t *method
         env.match.fptr = invalidate_conflicting;
         env.match.va = va;
         env.match.type = (jl_value_t*)type;
-        env.max_world = method->min_world - 1;
         jl_typemap_intersection_visitor(mt->cache, jl_cachearg_offset(mt), &env.match);
 
         size_t i, n = jl_array_len(env.shadowed);
@@ -1276,7 +1281,9 @@ JL_DLLEXPORT jl_value_t *jl_matching_methods(jl_tupletype_t *types, int lim, int
     assert(jl_nparams(types) > 0);
     if (jl_tparam0(types) == jl_bottom_type)
         return (jl_value_t*)jl_alloc_vec_any(0);
-    assert(jl_is_datatype(jl_tparam0(types)));
+    if (!jl_is_datatype(jl_tparam0(types))) {
+        return jl_false; // indeterminate - ml_matches can't deal with this case
+    }
     jl_methtable_t *mt = ((jl_datatype_t*)jl_tparam0(types))->name->mt;
     if (mt == NULL)
         return (jl_value_t*)jl_alloc_vec_any(0);

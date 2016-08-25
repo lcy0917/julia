@@ -807,7 +807,7 @@ end
 
 #### recursing into expression ####
 
-function abstract_call_gf_by_type(f::ANY, argtype::ANY, sv::InferenceState)
+function abstract_call_gf_by_type(f::ANY, atype::ANY, sv::InferenceState)
     tm = _topmod(sv)
     # don't consider more than N methods. this trades off between
     # compiler performance and generated code performance.
@@ -816,8 +816,11 @@ function abstract_call_gf_by_type(f::ANY, argtype::ANY, sv::InferenceState)
     # It is important for N to be >= the number of methods in the error()
     # function, so we can still know that error() is always Bottom.
     # here I picked 4.
-    argtype = limit_tuple_type(argtype)
+    argtype = limit_tuple_type(atype)
     argtypes = argtype.parameters
+    ft = argtypes[1] # TODO: ccall jl_first_argument_datatype here
+    isa(ft, DataType) || return Any # the function being called is unknown. can't properly handle this edge right now
+    isdefined(ft.name, :mt) || return Any # not callable. should be Bottom, but can't track this edge right now
     applicable = _methods_by_ftype(argtype, 4, sv.world)
     rettype = Bottom
     if is(applicable, false)
@@ -832,11 +835,15 @@ function abstract_call_gf_by_type(f::ANY, argtype::ANY, sv::InferenceState)
         # safer just to fall back on dynamic dispatch.
         return Any
     end
+    fullmatch = false
     for (m::SimpleVector) in x
         sig = m[1]::DataType
         method = m[3]::Method
         sparams = m[2]::SimpleVector
         recomputesvec = false
+        if !fullmatch && typeseq(sig, argtype)
+            fullmatch = true
+        end
 
         # limit argument type tuple growth
         lsig = length(m[3].sig.parameters)
@@ -943,9 +950,14 @@ function abstract_call_gf_by_type(f::ANY, argtype::ANY, sv::InferenceState)
         end
         (_tree, rt) = typeinf_edge(method, sig, sparams, sv, sv.world)
         rettype = tmerge(rettype, rt)
-        if is(rettype,Any)
+        if is(rettype, Any)
             break
         end
+    end
+    if !fullmatch && !is(rettype, Any)
+        # also need an edge to the method table in case something gets
+        # added that did not intersect with any existing method
+        add_mt_backedge(ft.name.mt, sv)
     end
     # if rettype is Bottom we've found a method not found error
     #print("=> ", rettype, "\n")
@@ -1513,6 +1525,15 @@ function add_backedge(li::MethodInstance, sv::InferenceState)
     in(li, sv.li_edges) || push!(sv.li_edges, li) # add a forward edge from caller to callee
     nothing
 end
+function add_mt_backedge(mt::MethodTable, sv::InferenceState)
+    caller = sv.linfo
+    isdefined(caller, :def) || return # don't add backedges to toplevel exprs
+    isdefined(mt, :backedges) || (mt.backedges = []) # lazy-init the backedges array
+    in(caller, mt.backedges) || push!(mt.backedges, caller) # add a backedge from callee to caller
+    # TODO: did this affect the valid ages for sv?
+    nothing
+end
+
 
 #### entry points for inferring a MethodInstance given a type signature ####
 function typeinf_edge(method::Method, atypes::ANY, sparams::SimpleVector, needtree::Bool, optimize::Bool, cached::Bool, caller, world::UInt)

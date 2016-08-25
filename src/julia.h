@@ -275,7 +275,7 @@ typedef struct _jl_method_instance_t {
     jl_tupletype_t *specTypes;  // argument types this was specialized for
     jl_value_t *rettype; // return type for fptr
     jl_svec_t *sparam_vals; // the values for the tvars, indexed by def->sparam_syms
-    jl_array_t *backedges;  // backedges
+    jl_array_t *backedges;
     jl_value_t *inferred;  // inferred jl_code_info_t, or value of the function if jlcall_api == 2, or null
     jl_method_t *def; // method this is specialized from, null if this is a toplevel thunk
     uint8_t inInference; // flags to tell if inference is running on this function
@@ -463,6 +463,7 @@ typedef struct _jl_methtable_t {
     intptr_t max_args;  // max # of non-vararg arguments in a signature
     jl_value_t *kwsorter;  // keyword argument sorter function
     jl_module_t *module; // used for incremental serialization to locate original binding
+    jl_array_t *backedges;
     jl_mutex_t writelock;
 } jl_methtable_t;
 

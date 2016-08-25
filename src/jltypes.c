@@ -3594,12 +3594,13 @@ void jl_init_types(void)
     jl_methtable_type->name->mt = jl_new_method_table(jl_methtable_type->name->name, ptls->current_module);
     jl_methtable_type->super = jl_any_type;
     jl_methtable_type->parameters = jl_emptysvec;
-    jl_methtable_type->name->names = jl_svec(8, jl_symbol("name"), jl_symbol("defs"),
+    jl_methtable_type->name->names = jl_svec(9, jl_symbol("name"), jl_symbol("defs"),
                                              jl_symbol("cache"), jl_symbol("max_args"),
                                              jl_symbol("kwsorter"), jl_symbol("module"),
-                                             jl_symbol(""), jl_symbol(""));
-    jl_methtable_type->types = jl_svec(8, jl_sym_type, jl_any_type, jl_any_type, jl_any_type/*jl_long*/,
-                                       jl_any_type, jl_any_type/*module*/, jl_any_type/*long*/, jl_any_type/*int32*/);
+                                             jl_symbol("backedges"), jl_symbol(""), jl_symbol(""));
+    jl_methtable_type->types = jl_svec(9, jl_sym_type, jl_any_type, jl_any_type, jl_any_type/*jl_long*/,
+                                       jl_any_type, jl_any_type/*module*/,
+                                       jl_any_type/*any vector*/, jl_any_type/*long*/, jl_any_type/*int32*/);
     jl_methtable_type->uid = jl_assign_type_uid();
     jl_methtable_type->instance = NULL;
     jl_methtable_type->struct_decl = NULL;
@@ -3856,6 +3857,7 @@ void jl_init_types(void)
 
     jl_svecset(jl_typename_type->types, 1, jl_module_type);
     jl_svecset(jl_methtable_type->types, 5, jl_module_type);
+    jl_svecset(jl_methtable_type->types, 6, jl_array_any_type);
 
     jl_code_info_type =
         jl_new_datatype(jl_symbol("CodeInfo"),
@@ -4014,11 +4016,11 @@ void jl_init_types(void)
     jl_svecset(jl_typename_type->types, 6, jl_long_type);
     jl_svecset(jl_methtable_type->types, 3, jl_long_type);
 #ifdef __LP64__
-    jl_svecset(jl_methtable_type->types, 6, jl_int64_type); // unsigned long
+    jl_svecset(jl_methtable_type->types, 7, jl_int64_type); // unsigned long
 #else
-    jl_svecset(jl_methtable_type->types, 6, jl_int32_type); // DWORD
+    jl_svecset(jl_methtable_type->types, 7, jl_int32_type); // DWORD
 #endif
-    jl_svecset(jl_methtable_type->types, 7, jl_int32_type); // uint32_t
+    jl_svecset(jl_methtable_type->types, 8, jl_int32_type); // uint32_t
     jl_svecset(jl_method_type->types, 12, jl_method_instance_type);
     jl_svecset(jl_method_instance_type->types, 9, jl_voidpointer_type);
     jl_svecset(jl_method_instance_type->types, 10, jl_voidpointer_type);

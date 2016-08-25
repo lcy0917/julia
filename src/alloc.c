@@ -834,6 +834,7 @@ JL_DLLEXPORT jl_methtable_t *jl_new_method_table(jl_sym_t *name, jl_module_t *mo
     mt->cache.unknown = jl_nothing;
     mt->max_args = 0;
     mt->kwsorter = NULL;
+    mt->backedges = NULL;
     JL_MUTEX_INIT(&mt->writelock);
     return mt;
 }
