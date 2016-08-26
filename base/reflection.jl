@@ -497,7 +497,7 @@ function _dump_function(f::ANY, t::ANY, native::Bool, wrapper::Bool, strip_ir_me
         throw(ArgumentError("argument is not a generic function"))
     end
     # get the MethodInstance for the method match
-    world = ccall(:jl_get_world_counter, UInt, ())
+    world = typemax(UInt)
     meth = which(f, t)
     t = to_tuple_type(t)
     ft = isa(f, Type) ? Type{f} : typeof(f)
@@ -737,13 +737,13 @@ function method_exists(f::ANY, t::ANY)
     t = to_tuple_type(t)
     t = Tuple{isa(f,Type) ? Type{f} : typeof(f), t.parameters...}
     return ccall(:jl_method_exists, Cint, (Any, Any, UInt), typeof(f).name.mt, t,
-        ccall(:jl_get_world_counter, UInt, ())) != 0
+        typemax(UInt)) != 0
 end
 
 function isambiguous(m1::Method, m2::Method)
     ti = typeintersect(m1.sig, m2.sig)
     ti === Bottom && return false
-    ml = _methods_by_ftype(ti, -1)
+    ml = _methods_by_ftype(ti, -1, typemax(UInt))
     isempty(ml) && return true
     for m in ml
         if ti <: m[3].sig
