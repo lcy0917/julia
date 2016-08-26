@@ -819,8 +819,9 @@ function abstract_call_gf_by_type(f::ANY, atype::ANY, sv::InferenceState)
     argtype = limit_tuple_type(atype)
     argtypes = argtype.parameters
     ft = argtypes[1] # TODO: ccall jl_first_argument_datatype here
-    isa(ft, DataType) || return Any # the function being called is unknown. can't properly handle this edge right now
-    isdefined(ft.name, :mt) || return Any # not callable. should be Bottom, but can't track this edge right now
+    isa(ft, DataType) || return Any # the function being called is unknown. can't properly handle this backedge right now
+    isdefined(ft.name, :mt) || return Any # not callable. should be Bottom, but can't track this backedge right now
+    is(ft.name, Type.name) && !isa(ft.parameters[1], DataType) && return Any # can't track this backedge to the ctor right now
     applicable = _methods_by_ftype(argtype, 4, sv.world)
     rettype = Bottom
     if is(applicable, false)
@@ -957,7 +958,12 @@ function abstract_call_gf_by_type(f::ANY, atype::ANY, sv::InferenceState)
     if !fullmatch && !is(rettype, Any)
         # also need an edge to the method table in case something gets
         # added that did not intersect with any existing method
-        add_mt_backedge(ft.name.mt, sv)
+        if is(ft.name, Type.name)
+            dt = ft.parameters[1]::DataType
+            add_ctor_backedge(dt.name, sv)
+        else
+            add_mt_backedge(ft.name.mt, sv)
+        end
     end
     # if rettype is Bottom we've found a method not found error
     #print("=> ", rettype, "\n")
@@ -1533,7 +1539,14 @@ function add_mt_backedge(mt::MethodTable, sv::InferenceState)
     # TODO: did this affect the valid ages for sv?
     nothing
 end
-
+function add_ctor_backedge(ctor::TypeName, sv::InferenceState)
+    caller = sv.linfo
+    isdefined(caller, :def) || return # don't add backedges to toplevel exprs
+    isdefined(ctor, :backedges) || (ctor.backedges = []) # lazy-init the backedges array
+    in(caller, ctor.backedges) || push!(ctor.backedges, caller) # add a backedge from callee to caller
+    # TODO: did this affect the valid ages for sv?
+    nothing
+end
 
 #### entry points for inferring a MethodInstance given a type signature ####
 function typeinf_edge(method::Method, atypes::ANY, sparams::SimpleVector, needtree::Bool, optimize::Bool, cached::Bool, caller, world::UInt)

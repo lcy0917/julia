@@ -3574,13 +3574,14 @@ void jl_init_types(void)
     jl_typename_type->name->mt = jl_new_method_table(jl_typename_type->name->name, ptls->current_module);
     jl_typename_type->super = jl_any_type;
     jl_typename_type->parameters = jl_emptysvec;
-    jl_typename_type->name->names = jl_svec(8, jl_symbol("name"), jl_symbol("module"),
+    jl_typename_type->name->names = jl_svec(9, jl_symbol("name"), jl_symbol("module"),
                                             jl_symbol("names"), jl_symbol("primary"),
                                             jl_symbol("cache"), jl_symbol("linearcache"),
-                                            jl_symbol("hash"), jl_symbol("mt"));
-    jl_typename_type->types = jl_svec(8, jl_sym_type, jl_any_type, jl_simplevector_type,
+                                            jl_symbol("hash"), jl_symbol("mt"),
+                                            jl_symbol("backedges"));
+    jl_typename_type->types = jl_svec(9, jl_sym_type, jl_any_type, jl_simplevector_type,
                                       jl_type_type, jl_simplevector_type, jl_simplevector_type,
-                                      jl_any_type, jl_any_type);
+                                      jl_any_type, jl_any_type, jl_any_type);
     jl_typename_type->uid = jl_assign_type_uid();
     jl_typename_type->instance = NULL;
     jl_typename_type->struct_decl = NULL;
@@ -3855,10 +3856,6 @@ void jl_init_types(void)
                         jl_svec(2, jl_symbol("mod"), jl_symbol("name")),
                         jl_svec(2, jl_module_type, jl_sym_type), 0, 0, 2);
 
-    jl_svecset(jl_typename_type->types, 1, jl_module_type);
-    jl_svecset(jl_methtable_type->types, 5, jl_module_type);
-    jl_svecset(jl_methtable_type->types, 6, jl_array_any_type);
-
     jl_code_info_type =
         jl_new_datatype(jl_symbol("CodeInfo"),
                         jl_any_type, jl_emptysvec,
@@ -4013,8 +4010,12 @@ void jl_init_types(void)
     jl_svecset(jl_datatype_type->types, 16, jl_bool_type);
     jl_svecset(jl_tvar_type->types, 3, jl_bool_type);
     jl_svecset(jl_simplevector_type->types, 0, jl_long_type);
+    jl_svecset(jl_typename_type->types, 1, jl_module_type);
     jl_svecset(jl_typename_type->types, 6, jl_long_type);
+    jl_svecset(jl_typename_type->types, 8, jl_array_any_type);
     jl_svecset(jl_methtable_type->types, 3, jl_long_type);
+    jl_svecset(jl_methtable_type->types, 5, jl_module_type);
+    jl_svecset(jl_methtable_type->types, 6, jl_array_any_type);
 #ifdef __LP64__
     jl_svecset(jl_methtable_type->types, 7, jl_int64_type); // unsigned long
 #else

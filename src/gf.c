@@ -1115,6 +1115,19 @@ JL_DLLEXPORT void jl_method_table_insert(jl_methtable_t *mt, jl_method_t *method
         jl_array_t *backedges = mt->backedges; // unrooted, but no allocations during invalidate_recursive
         mt->backedges = NULL;
         invalidate_recursive(backedges, env.max_world);
+        if (mt == jl_type_type_mt) {
+            assert(jl_is_tuple_type(type));
+            jl_value_t *dt0 = jl_tparam0(type);
+            if (jl_is_typevar(dt0))
+                dt0 = ((jl_tvar_t*)dt0)->ub;
+            if (jl_is_typector(dt0))
+                dt0 = ((jl_typector_t*)dt0)->body;
+            if (jl_is_datatype(dt0)) { // TODO: handle Union and abstract types here
+                jl_array_t *backedges = ((jl_datatype_t*)dt0)->name->backedges; // unrooted, but no allocations during invalidate_recursive
+                ((jl_datatype_t*)dt0)->name->backedges = NULL;
+                invalidate_recursive(backedges, env.max_world);
+            }
+        }
     }
     if (env.shadowed) {
         oldvalue = (jl_value_t*)env.shadowed; // use as gc root

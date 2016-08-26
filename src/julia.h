@@ -321,6 +321,7 @@ typedef struct {
     jl_svec_t *linearcache;  // unsorted array
     intptr_t hash;
     struct _jl_methtable_t *mt;
+    jl_array_t *backedges;
 } jl_typename_t;
 
 typedef struct {
