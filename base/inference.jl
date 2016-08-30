@@ -821,7 +821,20 @@ function abstract_call_gf_by_type(f::ANY, atype::ANY, sv::InferenceState)
     ft = argtypes[1] # TODO: ccall jl_first_argument_datatype here
     isa(ft, DataType) || return Any # the function being called is unknown. can't properly handle this backedge right now
     isdefined(ft.name, :mt) || return Any # not callable. should be Bottom, but can't track this backedge right now
-    is(ft.name, Type.name) && !isa(ft.parameters[1], DataType) && return Any # can't track this backedge to the ctor right now
+    if is(ft.name, Type.name)
+        tname = ft.parameters[1]
+        if isa(tname, TypeVar)
+            tname = tname.ub
+        end
+        if isa(tname, TypeConstructor)
+            tname = tname.body
+        end
+        if !isa(tname, DataType)
+            # can't track the backedge to the ctor right now
+            # for things like Union
+            return Any
+        end
+    end
     applicable = _methods_by_ftype(argtype, 4, sv.world)
     rettype = Bottom
     if is(applicable, false)
@@ -959,8 +972,7 @@ function abstract_call_gf_by_type(f::ANY, atype::ANY, sv::InferenceState)
         # also need an edge to the method table in case something gets
         # added that did not intersect with any existing method
         if is(ft.name, Type.name)
-            dt = ft.parameters[1]::DataType
-            add_ctor_backedge(dt.name, sv)
+            add_ctor_backedge((tname::DataType).name, sv)
         else
             add_mt_backedge(ft.name.mt, sv)
         end
