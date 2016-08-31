@@ -418,6 +418,8 @@ JL_DLLEXPORT jl_method_instance_t *jl_new_method_instance_uninit(void)
     li->specTypes = NULL;
     li->inInference = 0;
     li->def = NULL;
+    li->min_world = 0;
+    li->max_world = 0;
     return li;
 }
 
@@ -561,10 +563,12 @@ jl_method_instance_t *jl_get_specialized(jl_method_t *m, jl_tupletype_t *types, 
     new_linfo->def = m;
     new_linfo->specTypes = types;
     new_linfo->sparam_vals = sp;
+    new_linfo->min_world = m->min_world;
+    new_linfo->max_world = m->max_world;;
     return new_linfo;
 }
 
-JL_DLLEXPORT void jl_method_set_source(jl_method_t *m, jl_code_info_t *src)
+static void jl_method_set_source(jl_method_t *m, jl_code_info_t *src)
 {
     uint8_t j;
     uint8_t called = 0;

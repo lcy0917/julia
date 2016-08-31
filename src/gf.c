@@ -131,7 +131,8 @@ static int8_t jl_cachearg_offset(jl_methtable_t *mt)
 JL_DLLEXPORT jl_method_instance_t *jl_specializations_get_linfo(jl_method_t *m, jl_tupletype_t *type, jl_svec_t *sparams, size_t world)
 {
     JL_LOCK(&m->writelock);
-    jl_typemap_entry_t *sf = jl_typemap_assoc_by_type(m->specializations, type, NULL, 2, /*subtype*/0, /*offs*/0, world);
+    jl_typemap_entry_t *sf = jl_typemap_assoc_by_type(
+            m->specializations, type, NULL, 2, /*subtype*/0, /*offs*/0, world);
     if (sf && jl_is_method_instance(sf->func.value)) {
         JL_UNLOCK(&m->writelock);
         return (jl_method_instance_t*)sf->func.value;
@@ -140,7 +141,8 @@ JL_DLLEXPORT jl_method_instance_t *jl_specializations_get_linfo(jl_method_t *m, 
     JL_GC_PUSH1(&li);
     // TODO: fuse lookup and insert steps
     assert(world >= m->min_world && world <= m->max_world);
-    jl_typemap_insert(&m->specializations, (jl_value_t*)m, type, jl_emptysvec, NULL, jl_emptysvec, (jl_value_t*)li, 0, &tfunc_cache, m->min_world, m->max_world, NULL);
+    jl_typemap_insert(&m->specializations, (jl_value_t*)m, type, jl_emptysvec, NULL, jl_emptysvec, (jl_value_t*)li, 0, &tfunc_cache,
+            m->min_world, m->max_world, NULL);
     JL_UNLOCK(&m->writelock);
     JL_GC_POP();
     return li;
@@ -148,9 +150,15 @@ JL_DLLEXPORT jl_method_instance_t *jl_specializations_get_linfo(jl_method_t *m, 
 
 JL_DLLEXPORT void jl_specialization_set_world(jl_method_instance_t *li, size_t min_world, size_t max_world)
 {
+    assert(min_world <= max_world);
+    assert(li->min_world <= min_world);
+    assert(li->max_world >= max_world);
+    li->min_world = min_world;
+    li->max_world = max_world;
     if (li->def == NULL)
         return;
-    jl_typemap_entry_t *sf = jl_typemap_assoc_by_type(li->def->specializations, li->specTypes, NULL, 2, /*subtype*/0, /*offs*/0, max_world);
+    jl_typemap_entry_t *sf = jl_typemap_assoc_by_type(
+            li->def->specializations, li->specTypes, NULL, 2, /*subtype*/0, /*offs*/0, max_world);
     // these asserts are based on how it is used currently from inference.jl
     // they aren't really correct in general (well, in general, this method will corrupt the system state)
     assert(sf);
@@ -162,7 +170,8 @@ JL_DLLEXPORT void jl_specialization_set_world(jl_method_instance_t *li, size_t m
 
 JL_DLLEXPORT jl_value_t *jl_specializations_lookup(jl_method_t *m, jl_tupletype_t *type, size_t world)
 {
-    jl_typemap_entry_t *sf = jl_typemap_assoc_by_type(m->specializations, type, NULL, 2, /*subtype*/0, /*offs*/0, world);
+    jl_typemap_entry_t *sf = jl_typemap_assoc_by_type(
+            m->specializations, type, NULL, 2, /*subtype*/0, /*offs*/0, world);
     if (!sf)
         return jl_nothing;
     return sf->func.value;
@@ -170,7 +179,8 @@ JL_DLLEXPORT jl_value_t *jl_specializations_lookup(jl_method_t *m, jl_tupletype_
 
 JL_DLLEXPORT jl_value_t *jl_methtable_lookup(jl_methtable_t *mt, jl_tupletype_t *type, size_t world)
 {
-    jl_typemap_entry_t *sf = jl_typemap_assoc_by_type(mt->defs, type, NULL, 2, /*subtype*/0, /*offs*/0, world);
+    jl_typemap_entry_t *sf = jl_typemap_assoc_by_type(
+            mt->defs, type, NULL, 2, /*subtype*/0, /*offs*/0, world);
     if (!sf)
         return jl_nothing;
     return sf->func.value;
@@ -192,6 +202,8 @@ void jl_mk_builtin_func(jl_datatype_t *dt, const char *name, jl_fptr_t fptr)
     li->fptr = fptr;
     li->jlcall_api = 1;
     li->specTypes = jl_anytuple_type;
+    li->min_world = 1;
+    li->max_world = ~(size_t)0;
 
     li->def = jl_new_method_uninit();
     li->def->name = sname;
@@ -836,7 +848,8 @@ static jl_method_instance_t *cache_method(jl_methtable_t *mt, union jl_typemap_t
         }
     }
 
-    jl_typemap_insert(cache, parent, origtype, jl_emptysvec, type, guardsigs, (jl_value_t*)newmeth, jl_cachearg_offset(mt), &lambda_cache, m->min_world, m->max_world, NULL);
+    jl_typemap_insert(cache, parent, origtype, jl_emptysvec, type, guardsigs, (jl_value_t*)newmeth, jl_cachearg_offset(mt), &lambda_cache,
+            m->min_world, m->max_world, NULL);
 
     if (definition->traced && jl_method_tracer && allow_exec)
         jl_call_tracer(jl_method_tracer, (jl_value_t*)newmeth);
@@ -938,7 +951,8 @@ static int check_ambiguous_visitor(jl_typemap_entry_t *oldentry, struct typemap_
     // now we are checking that the reverse is true
     if (!jl_args_morespecific((jl_value_t*)(closure->after ? type : sig),
                               (jl_value_t*)(closure->after ? sig : type))) {
-        jl_typemap_entry_t *l = jl_typemap_assoc_by_type(map, (jl_tupletype_t*)isect, NULL, 0, 0, 0, closure->newentry->min_world);
+        jl_typemap_entry_t *l = jl_typemap_assoc_by_type(map, (jl_tupletype_t*)isect, NULL, 0, 0, 0,
+                closure->newentry->min_world);
         if (l != NULL) // ok, intersection is covered
             return 1;
         jl_method_t *mambig = oldentry->func.method;
@@ -1063,8 +1077,11 @@ static void invalidate_recursive(jl_array_t *backedges, size_t max_world)
             jl_datatype_t *gf = jl_first_argument_datatype((jl_value_t*)m->sig);
             assert(jl_is_datatype(gf) && gf->name->mt);
             jl_typemap_visitor(gf->name->mt->cache, invalidate_spec, &env);
-            if (env.invalidated)
+            assert(env.invalidated == env.replaced->max_world > max_world);
+            if (env.invalidated) {
+                env.replaced->max_world = max_world;
                 invalidate_recursive(env.replaced->backedges, max_world);
+            }
         }
     }
 }

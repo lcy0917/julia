@@ -278,6 +278,8 @@ typedef struct _jl_method_instance_t {
     jl_array_t *backedges;
     jl_value_t *inferred;  // inferred jl_code_info_t, or value of the function if jlcall_api == 2, or null
     jl_method_t *def; // method this is specialized from, null if this is a toplevel thunk
+    size_t min_world;
+    size_t max_world;
     uint8_t inInference; // flags to tell if inference is running on this function
     uint8_t jlcall_api; // the c-abi for fptr; 0 = jl_fptr_t, 1 = jl_fptr_sparam_t, 2 = constval
     uint8_t compile_traced; // if set will notify callback if this linfo is compiled

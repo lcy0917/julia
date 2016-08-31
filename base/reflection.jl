@@ -756,4 +756,6 @@ end
 let _min_age = Symbol("min-age"), _max_age = Symbol("max-age")
     global min_age(m::Method) = reinterpret(UInt, getfield(m, _min_age))
     global max_age(m::Method) = reinterpret(UInt, getfield(m, _max_age))
+    global min_age(m::Core.MethodInstance) = reinterpret(UInt, getfield(m, _min_age))
+    global max_age(m::Core.MethodInstance) = reinterpret(UInt, getfield(m, _max_age))
 end

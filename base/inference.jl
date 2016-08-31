@@ -167,8 +167,8 @@ type InferenceState
         end
 
         if cached && !toplevel
-            min_valid = min_age(meth)
-            max_valid = max_age(meth)
+            min_valid = min_age(linfo)
+            max_valid = max_age(linfo)
         else
             min_valid = UInt(0)
             max_valid = UInt(0)
@@ -219,16 +219,16 @@ function update_valid_ages!(sv::InferenceState)
         max_valid = sv.max_valid
         for li in sv.li_edges
             li = li::MethodInstance
-            min_valid = max(min_valid, min_age(li.def))
-            max_valid = min(max_valid, max_age(li.def))
+            min_valid = max(min_valid, min_age(li))
+            max_valid = min(max_valid, max_age(li))
         end
         sv.min_valid = min_valid
         sv.max_valid = max_valid
     end
 end
 function update_valid_age!(li::MethodInstance, sv::InferenceState)
-    sv.min_valid = max(sv.min_valid, min_age(li.def))
-    sv.max_valid = min(sv.max_valid, max_age(li.def))
+    sv.min_valid = max(sv.min_valid, min_age(li))
+    sv.max_valid = min(sv.max_valid, max_age(li))
 end
 
 
@@ -1548,10 +1548,9 @@ function add_backedge(li::MethodInstance, sv::InferenceState)
     isdefined(caller, :def) || return # don't add backedges to toplevel exprs
     isdefined(li, :backedges) || (li.backedges = []) # lazy-init the backedges array
     in(caller, li.backedges) || push!(li.backedges, caller) # add a backedge from callee to caller
+    update_valid_age!(li, sv)
     if li.inInference
         in(li, sv.li_edges) || push!(sv.li_edges, li) # add a forward edge from caller to callee
-    else
-        update_valid_age!(li, sv) # TODO: valid age is....?
     end
     nothing
 end

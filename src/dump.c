@@ -928,6 +928,8 @@ static void jl_serialize_value_(jl_serializer_state *s, jl_value_t *v)
         jl_serialize_value(s, li->rettype);
         jl_serialize_value(s, (jl_value_t*)li->sparam_vals);
         jl_serialize_value(s, (jl_value_t*)li->backedges);
+        write_int32(s->s, li->min_world);
+        write_int32(s->s, li->max_world);
         jl_serialize_value(s, (jl_value_t*)li->def);
         if (li->def) {
             uint16_t id = jl_fptr_id((void*)(uintptr_t)li->fptr);
@@ -1614,6 +1616,8 @@ static jl_value_t *jl_deserialize_value_(jl_serializer_state *s, jl_value_t *vta
         if (li->backedges)
             jl_gc_wb(li, li->backedges);
         li->unspecialized_ducttape = NULL;
+        li->min_world = read_int32(s->s);
+        li->max_world = read_int32(s->s);
         li->def = (jl_method_t*)jl_deserialize_value(s, (jl_value_t**)&li->def);
         if (li->def)
             jl_gc_wb(li, li->def);
