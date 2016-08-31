@@ -72,7 +72,7 @@ type InferenceState
     # whereas backedges is optimized for iteration
     edges::ObjectIdDict # a Dict{InferenceState, Vector{LineNum}}
     backedges::Vector{Tuple{InferenceState, Vector{LineNum}}}
-    li_edges::Vector{Any} # a Set{LambdaInfo}
+    li_edges::Vector{Any} # a Set{MethodInstance}
     # iteration fixed-point detection
     fixedpoint::Bool
     inworkq::Bool
@@ -159,17 +159,20 @@ type InferenceState
         W = IntSet()
         push!(W, 1) #initial pc to visit
 
-        if isdefined(linfo, :def)
+        if !toplevel
             meth = linfo.def
-            min_valid = min_age(meth)
-            max_valid = max_age(meth)
             inmodule = meth.module
         else
-            min_valid = UInt(0)
-            max_valid = typemax(UInt)
             inmodule = current_module() # toplevel thunks are inferred in the current module
         end
 
+        if cached && !toplevel
+            min_valid = min_age(meth)
+            max_valid = max_age(meth)
+        else
+            min_valid = UInt(0)
+            max_valid = UInt(0)
+        end
         frame = new(
             sp, nl, inmodule, 0,
             linfo, src, world, min_valid, max_valid,
@@ -178,7 +181,7 @@ type InferenceState
             ssavalue_uses, ssavalue_init,
             ObjectIdDict(), # Dict{InferenceState, Vector{LineNum}}(),
             Vector{Tuple{InferenceState, Vector{LineNum}}}(),
-            Vector{Any}(), # Set{LambdaInfo}()
+            Vector{Any}(), # Set{MethodInstance}()
             false, false, optimize, inlining, cached, false, false)
         push!(active, frame)
         nactive[] += 1
@@ -222,6 +225,10 @@ function update_valid_ages!(sv::InferenceState)
         sv.min_valid = min_valid
         sv.max_valid = max_valid
     end
+end
+function update_valid_age!(li::MethodInstance, sv::InferenceState)
+    sv.min_valid = max(sv.min_valid, min_age(li.def))
+    sv.max_valid = min(sv.max_valid, max_age(li.def))
 end
 
 
@@ -1090,7 +1097,8 @@ function pure_eval_call(f::ANY, argtypes::ANY, atype, vtypes, sv::InferenceState
 
     args = Any[ isa(a,Const) ? a.val : a.parameters[1] for a in drop(argtypes,1) ]
     try
-        return abstract_eval_constant(f(args...))
+        value = Core._apply_pure(f, args)
+        return abstract_eval_constant(value)
     catch
         return false
     end
@@ -1540,7 +1548,11 @@ function add_backedge(li::MethodInstance, sv::InferenceState)
     isdefined(caller, :def) || return # don't add backedges to toplevel exprs
     isdefined(li, :backedges) || (li.backedges = []) # lazy-init the backedges array
     in(caller, li.backedges) || push!(li.backedges, caller) # add a backedge from callee to caller
-    in(li, sv.li_edges) || push!(sv.li_edges, li) # add a forward edge from caller to callee
+    if li.inInference
+        in(li, sv.li_edges) || push!(sv.li_edges, li) # add a forward edge from caller to callee
+    else
+        update_valid_age!(li, sv) # TODO: valid age is....?
+    end
     nothing
 end
 function add_mt_backedge(mt::MethodTable, sv::InferenceState)
@@ -1734,6 +1746,9 @@ function typeinf_uncached(method::Method, atypes::ANY, sparams::ANY; optimize::B
 end
 function typeinf_uncached(method::Method, atypes::ANY, sparams::SimpleVector, optimize::Bool)
     return typeinf_edge(method, atypes, sparams, true, optimize, false, nothing, world_counter())
+end
+function typeinf_world(method::Method, atypes::ANY, sparams::SimpleVector, needtree::Bool, world::UInt)
+    return typeinf_edge(method, atypes, sparams, needtree, true, true, nothing, world)
 end
 function typeinf_ext(linfo::MethodInstance, world::UInt)
     if isdefined(linfo, :def)
@@ -2093,9 +2108,9 @@ function finish(me::InferenceState)
     end
 
     if me.cached
-        # TODO: check that mutating the lambda info is OK first?
-        if !const_api
-            if isdefined(me.linfo, :def)
+        toplevel = !isdefined(me.linfo, :def)
+        if !toplevel
+            if !const_api
                 keeptree = me.src.inlineable || ccall(:jl_is_cacheable_sig, Int32, (Any, Any, Any),
                     me.linfo.specTypes, me.linfo.def.sig, me.linfo.def) != 0
                 if !keeptree
@@ -2105,13 +2120,13 @@ function finish(me::InferenceState)
                     inferred.code = ccall(:jl_compress_ast, Any, (Any, Any), me.linfo.def, inferred.code)
                 end
             end
+            update_valid_ages!(me)
+            ccall(:jl_specialization_set_world, Void, (Any, UInt, UInt),
+                  me.linfo, me.min_valid, me.max_valid)
         end
+        # TODO: check that mutating the lambda info is OK first?
         ccall(:jl_set_lambda_rettype, Void, (Any, Any, Any, Any), me.linfo, widenconst(me.bestguess), const_api, inferred)
     end
-
-    update_valid_ages!(me)
-    ccall(:jl_specialization_set_world, Void, (Any, UInt, UInt),
-          me.linfo, me.min_valid, me.max_valid)
 
     me.src.inferred = true
     me.linfo.inInference = false
@@ -3977,7 +3992,7 @@ function return_type(f::ANY, t::ANY)
     world = ccall(:jl_get_tls_world_age, UInt, ())
     rt = Union{}
     for m in _methods(f, t, -1, world)
-        _, ty, inferred = typeinf(m[3], m[1], m[2], false)
+        _, ty, inferred = typeinf_world(m[3], m[1], m[2], false, world)
         !inferred && return Any
         rt = tmerge(rt, ty)
         rt === Any && break

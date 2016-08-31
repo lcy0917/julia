@@ -73,11 +73,11 @@ static htable_t fptr_to_id;
 static const jl_fptr_t id_to_fptrs[] = {
   NULL, NULL,
   jl_f_throw, jl_f_is, jl_f_typeof, jl_f_issubtype, jl_f_isa,
-  jl_f_typeassert, jl_f__apply, jl_f_isdefined, jl_f_tuple, jl_f_svec,
+  jl_f_typeassert, jl_f__apply, jl_f__apply_pure, jl_f_isdefined,
+  jl_f_tuple, jl_f_svec, jl_f_intrinsic_call,
   jl_f_getfield, jl_f_setfield, jl_f_fieldtype, jl_f_nfields,
   jl_f_arrayref, jl_f_arrayset, jl_f_arraysize, jl_f_apply_type,
   jl_f_applicable, jl_f_invoke, jl_unprotect_stack, jl_f_sizeof, jl_f__expr,
-  jl_f_intrinsic_call,
   NULL };
 
 static const intptr_t LongSymbol_tag   = 23;
@@ -2052,6 +2052,7 @@ static void jl_save_system_image_to_stream(ios_t *f)
     jl_serialize_value(&s, jl_main_module);
     jl_serialize_value(&s, jl_top_module);
     jl_serialize_value(&s, jl_typeinf_func);
+    write_uint64(f, jl_typeinf_world);
 
     // deserialize method tables of builtin types
     jl_serialize_value(&s, jl_type_type->name->mt);
@@ -2109,7 +2110,6 @@ JL_DLLEXPORT ios_t *jl_create_system_image(void)
     return f;
 }
 
-extern jl_function_t *jl_typeinf_func;
 extern int jl_boot_file_loaded;
 extern void jl_get_builtins(void);
 extern void jl_get_builtin_hooks(void);
@@ -2155,8 +2155,9 @@ static void jl_restore_system_image_from_stream(ios_t *f)
     jl_main_module = (jl_module_t*)jl_deserialize_value(&s, NULL);
     jl_top_module = (jl_module_t*)jl_deserialize_value(&s, NULL);
     jl_internal_main_module = jl_main_module;
-
     jl_typeinf_func = (jl_function_t*)jl_deserialize_value(&s, NULL);
+    jl_typeinf_world = read_uint64(f);
+
     jl_type_type_mt = (jl_methtable_t*)jl_deserialize_value(&s, NULL);
     jl_type_type->name->mt = jl_type_type_mt;
     jl_typector_type->name->mt = jl_type_type_mt;

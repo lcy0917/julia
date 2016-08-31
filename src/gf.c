@@ -221,9 +221,11 @@ jl_code_info_t *jl_type_infer(jl_method_instance_t *li, size_t world, int force)
     static int inInference = 0;
     int lastIn = inInference;
     jl_code_info_t *src = NULL;
+    size_t last_age = jl_get_ptls_states()->world_age;
     inInference = 1;
     if (force ||
-        (mod != jl_gf_mtable(jl_typeinf_func)->module &&
+        (last_age != jl_typeinf_world &&
+         mod != jl_gf_mtable(jl_typeinf_func)->module &&
          (mod != jl_core_module || !lastIn))) { // avoid any potential recursion in calling jl_typeinf_func on itself
         assert(li->inInference == 0);
         jl_value_t **fargs;
@@ -236,9 +238,8 @@ jl_code_info_t *jl_type_infer(jl_method_instance_t *li, size_t world, int force)
         jl_static_show_func_sig(JL_STDERR, (jl_value_t*)li->specTypes);
         jl_printf(JL_STDERR, "\n");
 #endif
-        size_t last_age = jl_get_ptls_states()->world_age; // FIXME: should be typeinf age?
-        jl_get_ptls_states()->world_age = jl_world_counter;
-        src = (jl_code_info_t *)jl_apply(fargs, 3);
+        jl_get_ptls_states()->world_age = jl_typeinf_world;
+        src = (jl_code_info_t*)jl_apply(fargs, 3);
         jl_get_ptls_states()->world_age = last_age;
         if (src == (void*)jl_nothing)
             src = NULL;
@@ -320,11 +321,14 @@ static void jl_reset_mt_caches(jl_module_t *m, jl_array_t *unspec)
     }
 }
 
-jl_function_t *jl_typeinf_func=NULL;
+jl_function_t *jl_typeinf_func = NULL;
+size_t jl_typeinf_world = 0;
 
 JL_DLLEXPORT void jl_set_typeinf_func(jl_value_t *f)
 {
     jl_typeinf_func = (jl_function_t*)f;
+    jl_typeinf_world = jl_get_tls_world_age();
+    ++jl_world_counter; // make type-inference the only thing in this world
     // give type inference a chance to see all of these
     jl_array_t *unspec = jl_alloc_vec_any(0);
     JL_GC_PUSH1(&unspec);

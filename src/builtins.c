@@ -550,6 +550,32 @@ JL_CALLABLE(jl_f__apply)
     return result;
 }
 
+// this is like `_apply`, but with quasi-exact checks to make sure it is pure
+JL_CALLABLE(jl_f__apply_pure)
+{
+    jl_ptls_t ptls = jl_get_ptls_states();
+    int last_in = ptls->in_pure_callback;
+    jl_value_t *ret = NULL;
+    JL_TRY {
+        ptls->in_pure_callback = 1;
+        // because this function was declared pure,
+        // we should be allowed to run it in any world
+        // so we run it in the newest world;
+        // because, why not :)
+        // and `promote` works better this way
+        size_t last_age = ptls->world_age;
+        ptls->world_age = jl_world_counter;
+        ret = jl_f__apply(NULL, args, nargs);
+        ptls->world_age = last_age;
+        ptls->in_pure_callback = last_in;
+    }
+    JL_CATCH {
+        ptls->in_pure_callback = last_in;
+        jl_rethrow();
+    }
+    return ret;
+}
+
 // eval -----------------------------------------------------------------------
 
 JL_DLLEXPORT jl_value_t *jl_toplevel_eval_in(jl_module_t *m, jl_value_t *ex)
@@ -1162,6 +1188,7 @@ void jl_init_primitives(void)
     // internal functions
     add_builtin_func("apply_type", jl_f_apply_type);
     add_builtin_func("_apply", jl_f__apply);
+    add_builtin_func("_apply_pure", jl_f__apply_pure);
     add_builtin_func("_expr", jl_f__expr);
     add_builtin_func("svec", jl_f_svec);
 
