@@ -10,6 +10,7 @@ const MAX_TUPLE_DEPTH = 4
 
 const MAX_TUPLE_SPLAT = 16
 const MAX_UNION_SPLITTING = 4
+const UNION_SPLIT_MISMATCH_ERROR = false
 
 # alloc_elim_pass! relies on `Slot_AssignedOnce | Slot_UsedUndef` being
 # SSA. This should be true now but can break if we start to track conditional
@@ -841,6 +842,13 @@ function abstract_call_gf_by_type(f::ANY, atype::ANY, sv::InferenceState)
         return Any
     end
     x::Array{Any,1} = applicable
+    if isempty(x)
+        # no methods match
+        # TODO: it would be nice to return Bottom here, but during bootstrap we
+        # often compile code that calls methods not defined yet, so it is much
+        # safer just to fall back on dynamic dispatch.
+        return Any
+    end
     fullmatch = false
     for (m::SimpleVector) in x
         sig = m[1]::DataType
@@ -2565,7 +2573,7 @@ function inlineable(f::ANY, ft::ANY, e::Expr, atypes::Vector{Any}, sv::Inference
                                 all = false
                             end
                         end
-                        if all
+                        if UNION_SPLIT_MISMATCH_ERROR && all
                             error_label === nothing && (error_label = genlabel(sv))
                             push!(stmts, GotoNode(error_label.label))
                         else
@@ -2584,7 +2592,7 @@ function inlineable(f::ANY, ft::ANY, e::Expr, atypes::Vector{Any}, sv::Inference
                 append!(stmts, match)
                 if error_label !== nothing
                     push!(stmts, error_label)
-                    push!(stmts, Expr(:call, GlobalRef(_topmod(sv.mod), :error), "fatal error in type inference (type bound)"))
+                    push!(stmts, Expr(:call, GlobalRef(_topmod(sv.mod), :error), "error in type inference due to #265"))
                 end
                 local ret_var, merge
                 if spec_miss !== nothing
@@ -2804,7 +2812,7 @@ function inlineable(f::ANY, ft::ANY, e::Expr, atypes::Vector{Any}, sv::Inference
     lastexpr = pop!(body.args)
     if isa(lastexpr,LabelNode)
         push!(body.args, lastexpr)
-        push!(body.args, Expr(:call, GlobalRef(_topmod(sv.mod), :error), "fatal error in type inference (lowering)"))
+        push!(body.args, Expr(:call, GlobalRef(_topmod(sv.mod),:error), "fatal error in type inference"))
         lastexpr = nothing
     elseif !(isa(lastexpr,Expr) && lastexpr.head === :return)
         # code sometimes ends with a meta node, e.g. inbounds pop
