@@ -1057,6 +1057,7 @@ static int invalidate_spec(jl_typemap_entry_t *oldentry, void *closure)
     struct invalidate_spec_env *env = (struct invalidate_spec_env*)closure;
     if (oldentry->func.linfo == env->replaced) {
         if (oldentry->max_world > env->max_world) {
+            assert(oldentry->min_world <= env->max_world);
             oldentry->max_world = env->max_world;
             env->invalidated = 1;
         }
@@ -1079,6 +1080,7 @@ static void invalidate_recursive(jl_array_t *backedges, size_t max_world)
             jl_typemap_visitor(gf->name->mt->cache, invalidate_spec, &env);
             assert(env.invalidated == env.replaced->max_world > max_world);
             if (env.invalidated) {
+                assert(env.replaced->min_world <= max_world);
                 env.replaced->max_world = max_world;
                 invalidate_recursive(env.replaced->backedges, max_world);
             }
@@ -1099,6 +1101,7 @@ static int invalidate_conflicting(jl_typemap_entry_t *oldentry, struct typemap_i
         if (d[i] == oldentry->func.linfo->def) {
             oldentry->max_world = closure->max_world;
             jl_method_instance_t *li = oldentry->func.linfo;
+            li->max_world = closure->max_world;
             jl_array_t *backedges = li->backedges; // unrooted, but no allocations during invalidate_recursive
             li->backedges = NULL;
             invalidate_recursive(backedges, closure->max_world);
