@@ -142,12 +142,26 @@ JL_DLLEXPORT jl_method_instance_t *jl_specializations_get_linfo(jl_method_t *m, 
     // TODO: fuse lookup and insert steps
     assert(world >= m->min_world && world <= m->max_world);
     jl_typemap_insert(&m->specializations, (jl_value_t*)m, type, jl_emptysvec, NULL, jl_emptysvec, (jl_value_t*)li, 0, &tfunc_cache,
-            m->min_world, m->max_world, NULL);
+            world, world, NULL);
     JL_UNLOCK(&m->writelock);
     JL_GC_POP();
     return li;
 }
 
+static int update_valid_world(jl_typemap_entry_t *entry, void *closure)
+{
+    if (entry->func.value == closure) {
+        jl_method_instance_t *li = (jl_method_instance_t*)closure;
+        // these asserts are based on how it is used currently from inference.jl
+        // they aren't really correct in general (well, in general, this method will corrupt the system state)
+        assert(entry->min_world == entry->max_world);
+        assert(li->min_world <= entry->min_world);
+        assert(li->max_world >= entry->max_world);
+        entry->min_world = li->min_world;
+        entry->max_world = li->max_world;
+    }
+    return 1;
+}
 JL_DLLEXPORT void jl_specialization_set_world(jl_method_instance_t *li, size_t min_world, size_t max_world)
 {
     assert(min_world <= max_world);
@@ -155,17 +169,8 @@ JL_DLLEXPORT void jl_specialization_set_world(jl_method_instance_t *li, size_t m
     assert(li->max_world >= max_world);
     li->min_world = min_world;
     li->max_world = max_world;
-    if (li->def == NULL)
-        return;
-    jl_typemap_entry_t *sf = jl_typemap_assoc_by_type(
-            li->def->specializations, li->specTypes, NULL, 2, /*subtype*/0, /*offs*/0, max_world);
-    // these asserts are based on how it is used currently from inference.jl
-    // they aren't really correct in general (well, in general, this method will corrupt the system state)
-    assert(sf);
-    assert(sf->min_world <= min_world);
-    assert(sf->max_world >= max_world);
-    sf->min_world = min_world;
-    sf->max_world = max_world;
+    if (li->def != NULL)
+        jl_typemap_visitor(li->def->specializations, update_valid_world, (void*)li);
 }
 
 JL_DLLEXPORT jl_value_t *jl_specializations_lookup(jl_method_t *m, jl_tupletype_t *type, size_t world)
@@ -1078,7 +1083,7 @@ static void invalidate_recursive(jl_array_t *backedges, size_t max_world)
             jl_datatype_t *gf = jl_first_argument_datatype((jl_value_t*)m->sig);
             assert(jl_is_datatype(gf) && gf->name->mt);
             jl_typemap_visitor(gf->name->mt->cache, invalidate_spec, &env);
-            assert(env.invalidated == env.replaced->max_world > max_world);
+            assert(env.invalidated == (env.replaced->max_world > max_world));
             if (env.invalidated) {
                 assert(env.replaced->min_world <= max_world);
                 env.replaced->max_world = max_world;
@@ -1099,12 +1104,16 @@ static int invalidate_conflicting(jl_typemap_entry_t *oldentry, struct typemap_i
     jl_method_t **d = (jl_method_t**)jl_array_ptr_data(closure->shadowed);
     for (i = 0; i < n; i++) {
         if (d[i] == oldentry->func.linfo->def) {
-            oldentry->max_world = closure->max_world;
-            jl_method_instance_t *li = oldentry->func.linfo;
-            li->max_world = closure->max_world;
-            jl_array_t *backedges = li->backedges; // unrooted, but no allocations during invalidate_recursive
-            li->backedges = NULL;
-            invalidate_recursive(backedges, closure->max_world);
+            if (oldentry->max_world > closure->max_world) {
+                assert(oldentry->min_world <= closure->max_world);
+                oldentry->max_world = closure->max_world;
+                jl_method_instance_t *li = oldentry->func.linfo;
+                assert(li->min_world <= closure->max_world);
+                li->max_world = closure->max_world;
+                jl_array_t *backedges = li->backedges; // unrooted, but no allocations during invalidate_recursive
+                li->backedges = NULL;
+                invalidate_recursive(backedges, closure->max_world);
+            }
             return 1;
         }
     }
