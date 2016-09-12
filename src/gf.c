@@ -141,8 +141,12 @@ JL_DLLEXPORT jl_method_instance_t *jl_specializations_get_linfo(jl_method_t *m, 
     JL_GC_PUSH1(&li);
     // TODO: fuse lookup and insert steps
     assert(world >= m->min_world && world <= m->max_world);
+    size_t max_world = (jl_world_counter == world ? m->max_world : world);
+    li->min_world = world;
+    li->max_world = max_world;
+    assert(world <= max_world);
     jl_typemap_insert(&m->specializations, (jl_value_t*)m, type, jl_emptysvec, NULL, jl_emptysvec, (jl_value_t*)li, 0, &tfunc_cache,
-            world, world, NULL);
+            world, max_world, NULL);
     JL_UNLOCK(&m->writelock);
     JL_GC_POP();
     return li;
@@ -152,11 +156,7 @@ static int update_valid_world(jl_typemap_entry_t *entry, void *closure)
 {
     if (entry->func.value == closure) {
         jl_method_instance_t *li = (jl_method_instance_t*)closure;
-        // these asserts are based on how it is used currently from inference.jl
-        // they aren't really correct in general (well, in general, this method will corrupt the system state)
-        assert(entry->min_world == entry->max_world);
-        assert(li->min_world <= entry->min_world);
-        assert(li->max_world >= entry->max_world);
+        assert(li->min_world <= entry->min_world); // entry min_world should have been the same as li min_world before jl_specialization_set_world
         entry->min_world = li->min_world;
         entry->max_world = li->max_world;
     }
@@ -165,12 +165,15 @@ static int update_valid_world(jl_typemap_entry_t *entry, void *closure)
 JL_DLLEXPORT void jl_specialization_set_world(jl_method_instance_t *li, size_t min_world, size_t max_world)
 {
     assert(min_world <= max_world);
-    assert(li->min_world <= min_world);
-    assert(li->max_world >= max_world);
+    // this assert is based on how it is used currently from inference.jl
+    // it is really not correct in general (well, in general, this method will corrupt the system state)
+    assert(min_world <= li->min_world); // may widen lower bound, but don't expect to be narrowing it
+                                           // could be widening or narrowing upper bound
     li->min_world = min_world;
     li->max_world = max_world;
-    if (li->def != NULL)
+    if (li->def != NULL) {
         jl_typemap_visitor(li->def->specializations, update_valid_world, (void*)li);
+    }
 }
 
 JL_DLLEXPORT jl_value_t *jl_specializations_lookup(jl_method_t *m, jl_tupletype_t *type, size_t world)
@@ -854,7 +857,7 @@ static jl_method_instance_t *cache_method(jl_methtable_t *mt, union jl_typemap_t
     }
 
     jl_typemap_insert(cache, parent, origtype, jl_emptysvec, type, guardsigs, (jl_value_t*)newmeth, jl_cachearg_offset(mt), &lambda_cache,
-            m->min_world, m->max_world, NULL);
+            newmeth->min_world, newmeth->max_world, NULL);
 
     if (definition->traced && jl_method_tracer && allow_exec)
         jl_call_tracer(jl_method_tracer, (jl_value_t*)newmeth);
