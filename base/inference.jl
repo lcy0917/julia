@@ -2575,6 +2575,7 @@ function inlineable(f::ANY, ft::ANY, e::Expr, atypes::Vector{Any}, sv::Inference
                     local sig = argtypes_to_type(atypes)
                     local li = ccall(:jl_get_spec_lambda, Any, (Any, UInt), sig, sv.world)
                     li === nothing && return false
+                    add_backedge(li, sv)
                     local stmt = []
                     push!(stmt, Expr(:(=), linfo_var, li))
                     spec_hit === nothing && (spec_hit = genlabel(sv))
@@ -2642,6 +2643,7 @@ function inlineable(f::ANY, ft::ANY, e::Expr, atypes::Vector{Any}, sv::Inference
         else
             local cache_linfo = ccall(:jl_get_spec_lambda, Any, (Any, UInt), atype_unlimited, sv.world)
             cache_linfo === nothing && return NF
+            add_backedge(cache_linfo, sv)
             e.head = :invoke
             unshift!(e.args, cache_linfo)
             return e
